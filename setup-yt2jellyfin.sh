@@ -31,6 +31,15 @@ log_info "Step 1: Installing system dependencies..."
 
 OS_TYPE="$(uname -s)"
 
+# Detect shell config file early (needed later)
+if [ -n "${ZSH_VERSION:-}" ] || [[ "$SHELL" == *"zsh"* ]]; then
+    SHELL_RC="$HOME/.zshrc"
+elif [ "$OS_TYPE" = "Darwin" ]; then
+    SHELL_RC="$HOME/.bash_profile"
+else
+    SHELL_RC="$HOME/.bashrc"
+fi
+
 if [ "$OS_TYPE" = "Darwin" ]; then
     # macOS
     if command -v brew &> /dev/null; then
