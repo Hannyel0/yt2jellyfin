@@ -2,18 +2,16 @@
 #
 # setup-yt2jellyfin.sh - Install and configure yt2jellyfin
 #
-# Supported platforms: Linux (Ubuntu/Debian, Fedora, Arch) and macOS
-#
 
 set -euo pipefail
 
+# Colors (using printf for macOS compatibility)
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Use printf for macOS compatibility (echo -e is not portable)
 log_info()    { printf "${BLUE}[INFO]${NC} %s\n" "$*"; }
 log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$*"; }
 log_warn()    { printf "${YELLOW}[WARN]${NC} %s\n" "$*"; }
@@ -26,55 +24,28 @@ printf "${GREEN}╚════════════════════�
 printf "\n"
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PLATFORM DETECTION
-# ══════════════════════════════════════════════════════════════════════════════
-
-detect_platform() {
-    case "$(uname -s)" in
-        Darwin*)  echo "macos" ;;
-        Linux*)   echo "linux" ;;
-        *)        echo "unknown" ;;
-    esac
-}
-
-PLATFORM=$(detect_platform)
-log_info "Detected platform: $PLATFORM"
-
-# ══════════════════════════════════════════════════════════════════════════════
 # STEP 1: Install system dependencies
 # ══════════════════════════════════════════════════════════════════════════════
 
 log_info "Step 1: Installing system dependencies..."
 
-if [ "$PLATFORM" = "macos" ]; then
-    # macOS - use Homebrew
-    if ! command -v brew &> /dev/null; then
-        log_warn "Homebrew not found. Installing Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+OS_TYPE="$(uname -s)"
 
-        # Add Homebrew to PATH for Apple Silicon Macs
-        if [ -f "/opt/homebrew/bin/brew" ]; then
-            eval "$(/opt/homebrew/bin/brew shellenv)"
-        fi
-    fi
-
-    log_info "Installing ffmpeg via Homebrew..."
-    brew install ffmpeg || brew upgrade ffmpeg || true
-
-    # Ensure Python 3 is available
-    if ! command -v python3 &> /dev/null; then
-        log_info "Installing Python 3 via Homebrew..."
-        brew install python3
+if [ "$OS_TYPE" = "Darwin" ]; then
+    # macOS
+    if command -v brew &> /dev/null; then
+        log_info "Detected macOS with Homebrew"
+        brew install ffmpeg python3 || true
+    else
+        log_warn "Homebrew not found. Install it from https://brew.sh"
+        log_warn "Then run: brew install ffmpeg python3"
     fi
 elif command -v apt &> /dev/null; then
-    # Debian/Ubuntu
     sudo apt update
     sudo apt install -y ffmpeg python3 python3-pip python3-venv
 elif command -v dnf &> /dev/null; then
-    # Fedora
     sudo dnf install -y ffmpeg python3 python3-pip
 elif command -v pacman &> /dev/null; then
-    # Arch Linux
     sudo pacman -S --noconfirm ffmpeg python python-pip
 else
     log_warn "Unknown package manager. Please install ffmpeg and python3 manually."
@@ -88,38 +59,41 @@ log_success "System dependencies installed"
 
 log_info "Step 2: Installing yt-dlp and mutagen..."
 
-if [ "$PLATFORM" = "macos" ]; then
-    # On macOS, prefer Homebrew for yt-dlp
-    if command -v brew &> /dev/null; then
-        brew install yt-dlp || brew upgrade yt-dlp || true
-        # Install mutagen via pip
-        pip3 install --user mutagen 2>/dev/null || \
-        pip3 install mutagen --break-system-packages 2>/dev/null || \
-        pip3 install mutagen || true
-    else
-        # Fallback to pip
-        pip3 install --user yt-dlp mutagen 2>/dev/null || \
-        pip3 install yt-dlp mutagen --break-system-packages 2>/dev/null || \
-        pip3 install yt-dlp mutagen
-    fi
+# On macOS, prefer Homebrew for yt-dlp (handles PATH automatically)
+if [ "$OS_TYPE" = "Darwin" ] && command -v brew &> /dev/null; then
+    brew install yt-dlp || brew upgrade yt-dlp || true
+    pip3 install --user mutagen --break-system-packages 2>/dev/null || \
+    pip3 install --user mutagen || true
+elif command -v pipx &> /dev/null; then
+    # Try pipx first (cleaner isolation)
+    pipx install yt-dlp || pipx upgrade yt-dlp
+    pipx inject yt-dlp mutagen || true
 else
-    # Linux - try pipx first (cleaner), fall back to pip
-    if command -v pipx &> /dev/null; then
-        pipx install yt-dlp || pipx upgrade yt-dlp
-        pipx inject yt-dlp mutagen || true
-    else
-        # Use pip with --break-system-packages for newer systems
-        pip3 install --user --upgrade yt-dlp mutagen --break-system-packages 2>/dev/null || \
-        pip3 install --user --upgrade yt-dlp mutagen || \
-        pip install --user --upgrade yt-dlp mutagen
+    # Fall back to pip --user
+    pip3 install --user --upgrade yt-dlp mutagen --break-system-packages 2>/dev/null || \
+    pip3 install --user --upgrade yt-dlp mutagen || \
+    pip install --user --upgrade yt-dlp mutagen
+fi
+
+# ═══ CRITICAL: Add common bin directories to PATH before verification ═══
+# pip --user installs to ~/.local/bin on Linux and ~/Library/Python/X.Y/bin on macOS
+export PATH="$HOME/.local/bin:$PATH"
+
+if [ "$OS_TYPE" = "Darwin" ]; then
+    # macOS: also add Python user bin
+    PYTHON_USER_BIN=$(python3 -c "import site; print(site.USER_BASE + '/bin')" 2>/dev/null || echo "")
+    if [ -n "$PYTHON_USER_BIN" ] && [ -d "$PYTHON_USER_BIN" ]; then
+        export PATH="$PYTHON_USER_BIN:$PATH"
     fi
 fi
 
-# Verify yt-dlp installation
+# Verify yt-dlp is accessible
 if command -v yt-dlp &> /dev/null; then
     log_success "yt-dlp $(yt-dlp --version) installed"
 else
-    log_error "yt-dlp installation failed. Please install manually."
+    log_error "yt-dlp installation failed. Please install manually:"
+    log_info "  pip3 install --user yt-dlp mutagen"
+    log_info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
     exit 1
 fi
 
@@ -147,26 +121,61 @@ fi
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
     log_info "Adding $INSTALL_DIR to PATH..."
 
-    # Detect shell configuration file
+    # Detect shell config file
     SHELL_RC=""
-    if [ -n "${ZSH_VERSION:-}" ] || [ -f "$HOME/.zshrc" ]; then
+    if [ -n "${ZSH_VERSION:-}" ] || [[ "$SHELL" == *"zsh"* ]]; then
         SHELL_RC="$HOME/.zshrc"
+    elif [[ "$SHELL" == *"bash"* ]]; then
+        # On Linux prefer .bashrc, on macOS prefer .bash_profile
+        if [ "$OS_TYPE" = "Darwin" ]; then
+            SHELL_RC="$HOME/.bash_profile"
+        else
+            SHELL_RC="$HOME/.bashrc"
+        fi
     elif [ -f "$HOME/.bashrc" ]; then
         SHELL_RC="$HOME/.bashrc"
     elif [ -f "$HOME/.bash_profile" ]; then
-        # macOS often uses .bash_profile instead of .bashrc
         SHELL_RC="$HOME/.bash_profile"
     fi
 
+    # Default to .bashrc if nothing found
+    SHELL_RC="${SHELL_RC:-$HOME/.bashrc}"
+
     if [ -n "$SHELL_RC" ]; then
-        # Check if already added
-        if ! grep -q 'yt2jellyfin' "$SHELL_RC" 2>/dev/null; then
-            printf "\n" >> "$SHELL_RC"
-            printf "# yt2jellyfin\n" >> "$SHELL_RC"
-            printf 'export PATH="$HOME/.local/bin:$PATH"\n' >> "$SHELL_RC"
-            log_info "Added PATH to $SHELL_RC"
+        # Create file if it doesn't exist
+        if [ ! -f "$SHELL_RC" ]; then
+            touch "$SHELL_RC"
         fi
-        log_warn "Run 'source $SHELL_RC' or restart your terminal"
+
+        # Check if we can write to the file
+        if [ -w "$SHELL_RC" ]; then
+            # Only add if not already present
+            if ! grep -q 'yt2jellyfin' "$SHELL_RC" 2>/dev/null; then
+                {
+                    printf "\n"
+                    printf "# yt2jellyfin\n"
+                    printf 'export PATH="$HOME/.local/bin:$PATH"\n'
+                } >> "$SHELL_RC"
+                log_info "Added PATH to $SHELL_RC"
+                log_warn "Run 'source $SHELL_RC' or restart your terminal"
+            fi
+        else
+            log_warn "Cannot write to $SHELL_RC (permission denied)"
+            log_info "Manually add this to your shell config:"
+            printf '  export PATH="$HOME/.local/bin:$PATH"\n'
+        fi
+    fi
+fi
+
+# Also add Python user bin to PATH for macOS (if using pip instead of brew)
+if [ "$OS_TYPE" = "Darwin" ] && [ -n "${PYTHON_USER_BIN:-}" ]; then
+    if [ -n "$SHELL_RC" ] && { [ -w "$SHELL_RC" ] || [ ! -f "$SHELL_RC" ]; }; then
+        if ! grep -q "Library/Python" "$SHELL_RC" 2>/dev/null; then
+            {
+                printf "# Python user bin (for pip packages)\n"
+                printf 'export PATH="%s:$PATH"\n' "$PYTHON_USER_BIN"
+            } >> "$SHELL_RC"
+        fi
     fi
 fi
 
@@ -177,31 +186,24 @@ fi
 log_info "Step 4: Configuration..."
 
 printf "\n"
-
-# Default music path differs between macOS and Linux
-if [ "$PLATFORM" = "macos" ]; then
-    DEFAULT_MUSIC_PATH="$HOME/Music/YouTube"
-else
-    DEFAULT_MUSIC_PATH="$HOME/Music/YouTube"
-fi
-
-printf "Enter your Jellyfin music library path (or press Enter for %s): " "$DEFAULT_MUSIC_PATH"
-read -r MUSIC_PATH
-MUSIC_PATH="${MUSIC_PATH:-$DEFAULT_MUSIC_PATH}"
+read -p "Enter your Jellyfin music library path (or press Enter for ~/Music/YouTube): " MUSIC_PATH
+MUSIC_PATH="${MUSIC_PATH:-$HOME/Music/YouTube}"
 
 # Create the directory
 mkdir -p "$MUSIC_PATH"
 
-# Add environment variable
-SHELL_RC="${SHELL_RC:-$HOME/.bashrc}"
-if [ "$PLATFORM" = "macos" ] && [ -z "${SHELL_RC:-}" ]; then
-    SHELL_RC="$HOME/.zshrc"
-fi
-
-if ! grep -q "YT2JELLYFIN_OUTPUT" "$SHELL_RC" 2>/dev/null; then
-    printf "\n" >> "$SHELL_RC"
-    printf "# yt2jellyfin default output directory\n" >> "$SHELL_RC"
-    printf 'export YT2JELLYFIN_OUTPUT="%s"\n' "$MUSIC_PATH" >> "$SHELL_RC"
+# Add environment variable to shell config
+if [ -n "$SHELL_RC" ] && [ -w "$SHELL_RC" ]; then
+    if ! grep -q "YT2JELLYFIN_OUTPUT" "$SHELL_RC" 2>/dev/null; then
+        {
+            printf "\n"
+            printf "# yt2jellyfin default output directory\n"
+            printf 'export YT2JELLYFIN_OUTPUT="%s"\n' "$MUSIC_PATH"
+        } >> "$SHELL_RC"
+    fi
+else
+    log_warn "Cannot write to shell config"
+    log_info "Manually add: export YT2JELLYFIN_OUTPUT=\"$MUSIC_PATH\""
 fi
 
 log_success "Default output: $MUSIC_PATH"
@@ -242,7 +244,6 @@ if [ ! -f "$YT_DLP_CONFIG" ]; then
 # Cookies from browser (uncomment if you need to access age-restricted content)
 # --cookies-from-browser firefox
 # --cookies-from-browser chrome
-# --cookies-from-browser safari
 EOF
     log_success "Created yt-dlp config at $YT_DLP_CONFIG"
 else
@@ -272,5 +273,5 @@ printf "\n"
 printf "  ${BLUE}# See all options${NC}\n"
 printf "  yt2jellyfin --help\n"
 printf "\n"
-printf "${YELLOW}Note: Restart your terminal or run 'source %s' to use the command${NC}\n" "${SHELL_RC}"
+printf "${YELLOW}Note: Restart your terminal or run 'source %s' to use the command${NC}\n" "${SHELL_RC:-~/.bashrc}"
 printf "\n"
