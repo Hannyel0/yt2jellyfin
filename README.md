@@ -1,9 +1,15 @@
 # yt2jellyfin
 
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue)
-![Shell](https://img.shields.io/badge/shell-bash-green)
-![License](https://img.shields.io/badge/license-MIT-yellow)
-[![yt-dlp](https://img.shields.io/badge/powered%20by-yt--dlp-red)](https://github.com/yt-dlp/yt-dlp)
+<p align="center">
+  <img src="yt2jellyfin.png" alt="yt2jellyfin banner" width="600">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="Platform">
+  <img src="https://img.shields.io/badge/shell-bash-green" alt="Shell">
+  <img src="https://img.shields.io/badge/license-MIT-yellow" alt="License">
+  <a href="https://github.com/yt-dlp/yt-dlp"><img src="https://img.shields.io/badge/powered%20by-yt--dlp-red" alt="yt-dlp"></a>
+</p>
 
 Download YouTube audio as high-quality MP3 files, automatically organized for Jellyfin.
 
